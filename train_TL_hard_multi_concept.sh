@@ -1,7 +1,7 @@
 export MODEL_NAME="runwayml/stable-diffusion-v1-5"
 export INSTANCE_DIR="path_to_instance_dir"
-export HEATMAP_DIR_1="path_to_mask_dir (first_concept)"
-export HEATMAP_DIR_2="path_to_mask_dir (second_concept)"
+export MASK_DIR_1="path_to_mask_dir (first_concept)"
+export MASK_DIR_2="path_to_mask_dir (second_concept)"
 export CLASS_DIR_1="path_to_prior_preservation_image_dir (first_concept)"
 export CLASS_DIR_2="path_to_prior_preservation_image_dir (second_concept)"
 export OUTPUT_DIR="path_to_output_dir"
@@ -12,8 +12,8 @@ export INSTANCE_PROMPT="photo of a <new1> [class_name_1] and a <new2> [class_nam
 accelerate launch ./model/multi_concept/text_localization_hard_guidance.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \
   --instance_data_dir=$INSTANCE_DIR \
-  --heatmap_dir_1=$HEATMAP_DIR_1 \
-  --heatmap_dir_2=$HEATMAP_DIR_2 \
+  --heatmap_dir_1=$MASK_DIR_1 \
+  --heatmap_dir_2=$MASK_DIR_2 \
   --output_dir=$OUTPUT_DIR \
   --class_data_dir_1=$CLASS_DIR_1 \
   --class_data_dir_2=$CLASS_DIR_2 \

@@ -15,7 +15,7 @@ accelerate launch ./model/single_object/text_localization_soft_guidance.py \
   --with_prior_preservation --prior_loss_weight=1.0 \
   --class_prompt_1=$CLASS_PROMPT_1 \
   --num_class_images=200 \
-  --instance_prompt="photo of a <new1> cat figurine"  \
+  --instance_prompt=$INSTANCE_PROMPT  \
   --resolution=512  \
   --train_batch_size=2  \
   --learning_rate=1e-5  \

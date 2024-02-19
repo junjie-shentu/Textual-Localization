@@ -5,7 +5,6 @@ Subject-driven text-to-image diffusion models empower users to tailor the model 
 [Paper Link ](https://arxiv.org/abs/2402.09966)
 
 ## Getting Started
-### setup
 Download and set up the repo:
 ```
 git clone https://github.com/junjie-shentu/Textual-Localization.git
@@ -19,3 +18,59 @@ conda activate textual-localization
 ```
 
 ## Training Texual Localization
+### Learn single concept from multi-concept input images
+Train the textual localization model to learn single concept from the input image, first modify the `train_TL_hard_single_concept.sh`/`train_TL_soft_single_concept.sh` to specify the variabls:
+```
+#take the class "doll" as an example
+export MODEL_NAME="runwayml/stable-diffusion-v1-5"
+export INSTANCE_DIR="../data/multi_concept/bucket+doll/resized"
+export MASK_DIR_1="../data/multi_concept/bucket+doll/mask_2"
+export CLASS_DIR_1="../data/prior_data/doll"
+export OUTPUT_DIR="../output/single_concept/doll"
+export CLASS_PROMPT_1="doll"
+export INSTANCE_PROMPT="photo of a <new1> doll"
+```
+
+Then run the following command:
+```
+bash train_TL_hard_single_concept.sh
+```
+Or
+```
+bash train_TL_soft_single_concept.sh
+```
+
+### Learn multiple concepts from multi-concept input images
+Train the textual localization model to learn multiple concepts from the input image, first modify the `train_TL_hard_multi_concept.sh`/`train_TL_soft_multi_concept.sh` to specify the variabls:
+```
+export MODEL_NAME="runwayml/stable-diffusion-v1-5"
+export INSTANCE_DIR="../data/multi_concept/bucket+doll/resized"
+export MASK_DIR_1="../data/multi_concept/bucket+doll/mask_1"
+export MASK_DIR_2="../data/multi_concept/bucket+doll/mask_2"
+export CLASS_DIR_1="../data/prior_data/bucket"
+export CLASS_DIR_2="../data/prior_data/doll"
+export OUTPUT_DIR="../output/multi_concept/bucket+doll"
+export CLASS_PROMPT_1="bucket"
+export CLASS_PROMPT_2="doll"
+export INSTANCE_PROMPT="photo of a <new1> bucket and a <new2> doll"
+```
+
+Then run the following command:
+```
+bash train_TL_hard_multi_concept.sh
+```
+Or
+```
+bash train_TL_soft_multi_concept.sh
+```
+
+## Evaluation
+Evaluate the textual localization model when learning single concept from multi-concept input images:
+```
+python .evaluation/evaluate_single_concept.py --RAMDOM_SEED_LOW 1 --RAMDOM_SEED_HIGH 6 --NEW_TOKEN "<NEW1>" --object "doll" --ckpt_path "../output/single_concept/doll/wkwv/checkpoint-100" --image_output_path "../generated_images/single_concept/doll"
+```
+
+Evaluate the textual localization model when learning multiple concepts from multi-concept input images:
+```
+python .evaluation/evaluate_multi_concept.py --RAMDOM_SEED_LOW 1 --RAMDOM_SEED_HIGH 6 --NEW_TOKEN_1 "<NEW1>" --NEW_TOKEN_2 "<NEW2>" --object_1 "bucket" --object_2 "doll" --ckpt_path "../output/multi_concept/bucket+doll/wkwv/checkpoint-100" --image_output_path "../generated_images/multi_concept/bucket+doll"
+```

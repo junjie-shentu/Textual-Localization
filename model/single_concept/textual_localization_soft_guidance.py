@@ -1330,7 +1330,7 @@ def main(args):
                 if global_step > 49 and global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
 
-                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                        save_path = os.path.join(args.output_dir, "wkwv", f"checkpoint-{global_step}") #wkwv means we finetune the W_q and W_v matrix in the cross attention layer
                         unet = unet.to(torch.float32)
                         loader.save_attn_procs(save_path, 
                                                safe_serialization=not args.no_safe_serialization)

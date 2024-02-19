@@ -25,8 +25,8 @@ if is_accelerate_available():
 
 logger = get_logger(__name__)
 
-CUSTOM_DIFFUSION_WEIGHT_NAME_SAFE = "pytorch_custom_diffusion_weights.safetensors"
-CUSTOM_DIFFUSION_WEIGHT_NAME = "pytorch_custom_diffusion_weights.bin"
+TEXTUAL_LOCALIZATION_WEIGHT_NAME_SAFE = "pytorch_textual_localization_weights.safetensors"
+TEXTUAL_LOCALIZATION_WEIGHT_NAME = "pytorch_textual_localization_weights.bin"
 
 class CustomModelLoader(UNet2DConditionLoadersMixin):
     r"""
@@ -411,9 +411,9 @@ class CustomModelLoader(UNet2DConditionLoadersMixin):
 
         if weight_name is None:
             if safe_serialization:
-                weight_name = CUSTOM_DIFFUSION_WEIGHT_NAME_SAFE
+                weight_name = TEXTUAL_LOCALIZATION_WEIGHT_NAME_SAFE
             else:
-                weight_name = CUSTOM_DIFFUSION_WEIGHT_NAME
+                weight_name = TEXTUAL_LOCALIZATION_WEIGHT_NAME
 
         # Save the model
         save_function(state_dict, os.path.join(save_directory, weight_name))
