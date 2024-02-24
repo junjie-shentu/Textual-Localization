@@ -74,3 +74,14 @@ Evaluate the textual localization model when learning multiple concepts from mul
 ```
 python .evaluation/evaluate_multi_concept.py --RAMDOM_SEED_LOW 1 --RAMDOM_SEED_HIGH 6 --NEW_TOKEN_1 "<NEW1>" --NEW_TOKEN_2 "<NEW2>" --object_1 "bucket" --object_2 "doll" --ckpt_path "../output/multi_concept/bucket+doll/wkwv/checkpoint-100" --image_output_path "../generated_images/multi_concept/bucket+doll"
 ```
+
+## Citation
+If you find this work helpful, please consider citing the following BibTeX entry:
+```
+@article{shentu2024textual,
+  title={Textual Localization: Decomposing Multi-concept Images for Subject-Driven Text-to-Image Generation},
+  author={Shentu, Junjie and Watson, Matthew and Moubayed, Noura Al},
+  journal={arXiv preprint arXiv:2402.09966},
+  year={2024}
+}
+```
