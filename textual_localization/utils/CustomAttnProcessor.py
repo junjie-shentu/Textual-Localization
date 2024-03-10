@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from typing import Optional
 from diffusers.models.attention_processor import Attention
 
-from CrossAttnMap import AttentionStore
+from textual_localization.utils.CrossAttnMap import AttentionStore
 
 class CustomDiffusionAttnProcessor2_0(nn.Module):
     r"""

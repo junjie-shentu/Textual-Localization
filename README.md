@@ -17,6 +17,11 @@ conda create --name textual-localization --file environment.yml
 conda activate textual-localization
 ```
 
+Enable relative import:
+```
+pip install -e .
+```
+
 ## Training Texual Localization
 ### Learn single concept from multi-concept input images
 Train the textual localization model to learn single concept from the input image, first modify the `train_TL_hard_single_concept.sh`/`train_TL_soft_single_concept.sh` to specify the variabls:

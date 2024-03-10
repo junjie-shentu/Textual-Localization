@@ -39,14 +39,14 @@ from diffusers.loaders import AttnProcsLayers
 from diffusers.models.attention_processor import (
     CustomDiffusionXFormersAttnProcessor,
 )
-from ...utils.CustomAttnProcessor import CustomDiffusionAttnProcessor
-from ...utils.CustomModelLoader import CustomModelLoader
+from textual_localization.utils.CustomAttnProcessor import CustomDiffusionAttnProcessor
+from textual_localization.utils.CustomModelLoader import CustomModelLoader
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 import wandb
 
-from ...utils.CrossAttnMap import AttentionStore, aggregate_current_attention
+from textual_localization.utils.CrossAttnMap import AttentionStore, aggregate_current_attention
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.

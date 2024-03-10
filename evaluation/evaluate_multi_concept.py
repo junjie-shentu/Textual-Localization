@@ -6,9 +6,9 @@ import os
 from tqdm import tqdm
 from PIL import Image
 import argparse
-from ..utils.evaluation_metrics import CalculateMetrics
+from textual_localization.utils.evaluation_metrics import CalculateMetrics
 
-from ..utils.CustomModelLoader import CustomModelLoader
+from textual_localization.utils.CustomModelLoader import CustomModelLoader
 
 # Create the parser
 parser = argparse.ArgumentParser(description='Process some integers.')

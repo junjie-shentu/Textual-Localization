@@ -15,8 +15,8 @@ from diffusers.utils.logging import get_logger
 
 from diffusers.models.lora import LoRACompatibleConv, LoRACompatibleLinear, LoRAConv2dLayer, LoRALinearLayer
 
-#from diffusers.models.attention_processor import (CustomDiffusionAttnProcessor,)
-from CustomAttnProcessor import CustomDiffusionAttnProcessor2_0 as CustomDiffusionAttnProcessor # because the working path is usually /evaluation, so need to go to baseline_model
+
+from textual_localization.utils.CustomAttnProcessor import CustomDiffusionAttnProcessor2_0 as CustomDiffusionAttnProcessor
 
 
 if is_accelerate_available():

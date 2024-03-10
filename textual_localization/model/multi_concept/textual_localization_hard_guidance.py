@@ -39,14 +39,14 @@ from diffusers.loaders import AttnProcsLayers
 from diffusers.models.attention_processor import (
     CustomDiffusionXFormersAttnProcessor,
 )
-from ...utils.CustomAttnProcessor import CustomDiffusionAttnProcessor
-from ...utils.CustomModelLoader import CustomModelLoader
+from textual_localization.utils.CustomAttnProcessor import CustomDiffusionAttnProcessor
+from textual_localization.utils.CustomModelLoader import CustomModelLoader
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 import wandb
 
-from ...utils.CrossAttnMap import AttentionStore, aggregate_current_attention
+from textual_localization.utils.CrossAttnMap import AttentionStore, aggregate_current_attention
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -83,7 +83,6 @@ def freeze_params(params):
 
 
 
-
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
     text_encoder_config = PretrainedConfig.from_pretrained(
         pretrained_model_name_or_path,
@@ -109,23 +108,29 @@ def collate_fn(examples, with_prior_preservation):
     pixel_values = [example["instance_images"] for example in examples]
     mask = [example["mask"] for example in examples]
     attention_maps_1 = [example["heatmap_1"] for example in examples]
+    attention_maps_2 = [example["heatmap_2"] for example in examples]
     # Concat class and instance examples for prior preservation.
     # We do this to avoid doing two forward passes.
     if with_prior_preservation:
         input_ids += [example["class_prompt_ids_1"] for example in examples]
+        input_ids += [example["class_prompt_ids_2"] for example in examples]
         pixel_values += [example["class_images_1"] for example in examples]
+        pixel_values += [example["class_images_2"] for example in examples]
         mask += [example["class_mask_1"] for example in examples]
+        mask += [example["class_mask_2"] for example in examples]
 
     input_ids = torch.cat(input_ids, dim=0)
     pixel_values = torch.stack(pixel_values)
     mask = torch.stack(mask)
     attention_maps_1 = torch.stack(attention_maps_1)
+    attention_maps_2 = torch.stack(attention_maps_2)
 
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
     mask = mask.to(memory_format=torch.contiguous_format).float()
     attention_maps_1 = attention_maps_1.to(memory_format=torch.contiguous_format).float()
+    attention_maps_2 = attention_maps_2.to(memory_format=torch.contiguous_format).float()
 
-    batch = {"input_ids": input_ids, "pixel_values": pixel_values, "mask": mask.unsqueeze(1), "attention_maps_1": attention_maps_1}
+    batch = {"input_ids": input_ids, "pixel_values": pixel_values, "mask": mask.unsqueeze(1), "attention_maps_1": attention_maps_1, "attention_maps_2": attention_maps_2}
     return batch
 
 
@@ -173,15 +178,17 @@ class CustomDiffusionDataset(Dataset):
 
         self.instance_images_path = []
         self.class_images_path_1 = []
+        self.class_images_path_2 = []
         self.with_prior_preservation = with_prior_preservation
         for concept in concepts_list:
             inst_img_path = [
-                (x, concept["instance_prompt"], os.path.join(concept["heatmap_dir_1"], (x.stem + ".png"))) for x in Path(concept["instance_data_dir"]).iterdir() if x.is_file()
+                (x, concept["instance_prompt"], os.path.join(concept["heatmap_dir_1"], (x.stem + ".png")), os.path.join(concept["heatmap_dir_2"], (x.stem + ".png"))) for x in Path(concept["instance_data_dir"]).iterdir() if x.is_file()
             ]
             self.instance_images_path.extend(inst_img_path)
 
             if with_prior_preservation:
                 class_data_root_1 = Path(concept["class_data_dir_1"])
+                class_data_root_2 = Path(concept["class_data_dir_2"])
                 if os.path.isdir(class_data_root_1):
                     class_images_path_1 = list(class_data_root_1.iterdir())
                     class_prompt_1 = [concept["class_prompt_1"] for _ in range(len(class_images_path_1))]
@@ -190,14 +197,26 @@ class CustomDiffusionDataset(Dataset):
                         class_images_path_1 = f.read().splitlines()
                     with open(concept["class_prompt_1"], "r") as f:
                         class_prompt_1 = f.read().splitlines()
+                
+                if os.path.isdir(class_data_root_2):
+                    class_images_path_2 = list(class_data_root_2.iterdir())
+                    class_prompt_2 = [concept["class_prompt_2"] for _ in range(len(class_images_path_2))]
+                else:
+                    with open(class_data_root_2, "r") as f:
+                        class_images_path_2 = f.read().splitlines()
+                    with open(concept["class_prompt_2"], "r") as f:
+                        class_prompt_2 = f.read().splitlines()
 
                 class_img_path_1 = list(zip(class_images_path_1, class_prompt_1))
+                class_img_path_2 = list(zip(class_images_path_2, class_prompt_2))
                 self.class_images_path_1.extend(class_img_path_1[:num_class_images])
+                self.class_images_path_2.extend(class_img_path_2[:num_class_images])
 
         #random.shuffle(self.instance_images_path)
         self.num_instance_images = len(self.instance_images_path)
         self.num_class_images_1 = len(self.class_images_path_1)
-        self._length = max(self.num_class_images_1, self.num_instance_images)
+        self.num_class_images_2 = len(self.class_images_path_2)
+        self._length = max(self.num_class_images_1, self.num_class_images_2, self.num_instance_images)
         self.flip = transforms.RandomHorizontalFlip(0.5 * hflip)
 
         self.image_transforms = transforms.Compose(
@@ -244,12 +263,12 @@ class CustomDiffusionDataset(Dataset):
 
     def __getitem__(self, index):
         example = {}
-        instance_image, instance_prompt, heatmap_image_1 = self.instance_images_path[index % self.num_instance_images]
+        instance_image, instance_prompt, heatmap_image_1, heatmap_image_2 = self.instance_images_path[index % self.num_instance_images]
         instance_image = Image.open(instance_image)
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
-        #instance_image = self.flip(instance_image)
         heatmap_image_1 = Image.open(heatmap_image_1).convert("L")
+        heatmap_image_2 = Image.open(heatmap_image_2).convert("L")
 
         # apply resize augmentation and create a valid image region mask
         random_scale = self.size
@@ -267,7 +286,8 @@ class CustomDiffusionDataset(Dataset):
             instance_prompt = np.random.choice(["zoomed in ", "close up "]) + instance_prompt
 
         example["instance_images"] = torch.from_numpy(instance_image).permute(2, 0, 1)
-        example["heatmap_1"] = self.heatmap_transforms(heatmap_image_1)
+        example["heatmap_1"] = self.heatmap_transforms(heatmap_image_1)#torch.from_numpy(instance_heatmap_1)
+        example["heatmap_2"] = self.heatmap_transforms(heatmap_image_2)#torch.from_numpy(instance_heatmap_2)
         example["mask"] = torch.from_numpy(mask)
         example["instance_prompt_ids"] = self.tokenizer(
             instance_prompt,
@@ -279,13 +299,26 @@ class CustomDiffusionDataset(Dataset):
 
         if self.with_prior_preservation:
             class_image_1, class_prompt_1 = self.class_images_path_1[index % self.num_class_images_1]
+            class_image_2, class_prompt_2 = self.class_images_path_2[index % self.num_class_images_2]
             class_image_1 = Image.open(class_image_1)
+            class_image_2 = Image.open(class_image_2)
             if not class_image_1.mode == "RGB":
                 class_image_1 = class_image_1.convert("RGB")
+            if not class_image_2.mode == "RGB":
+                class_image_2 = class_image_2.convert("RGB")
             example["class_images_1"] = self.image_transforms(class_image_1)
+            example["class_images_2"] = self.image_transforms(class_image_2)
             example["class_mask_1"] = torch.ones_like(example["mask"])
+            example["class_mask_2"] = torch.ones_like(example["mask"])
             example["class_prompt_ids_1"] = self.tokenizer(
                 class_prompt_1,
+                truncation=True,
+                padding="max_length",
+                max_length=self.tokenizer.model_max_length,
+                return_tensors="pt",
+            ).input_ids
+            example["class_prompt_ids_2"] = self.tokenizer(
+                class_prompt_2,
                 truncation=True,
                 padding="max_length",
                 max_length=self.tokenizer.model_max_length,
@@ -311,7 +344,7 @@ def save_new_embed(text_encoder, modifier_token_id, accelerator, args, output_di
 
 
 def parse_args(input_args=None):
-    parser = argparse.ArgumentParser(description="Texutal Localization training script.")
+    parser = argparse.ArgumentParser(description="Textual Localization training script.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -345,7 +378,19 @@ def parse_args(input_args=None):
         help="A folder containing the heatmap of instance images.",
     )
     parser.add_argument(
+        "--heatmap_dir_2",
+        type=str,
+        default=None,
+        help="A folder containing the heatmap of instance images.",
+    )
+    parser.add_argument(
         "--class_data_dir_1",
+        type=str,
+        default=None,
+        help="A folder containing the training data of class images.",
+    )
+    parser.add_argument(
+        "--class_data_dir_2",
         type=str,
         default=None,
         help="A folder containing the training data of class images.",
@@ -358,6 +403,12 @@ def parse_args(input_args=None):
     )
     parser.add_argument(
         "--class_prompt_1",
+        type=str,
+        default=None,
+        help="The prompt to specify images in the same class as provided instance images.",
+    )
+    parser.add_argument(
+        "--class_prompt_2",
         type=str,
         default=None,
         help="The prompt to specify images in the same class as provided instance images.",
@@ -700,7 +751,7 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("textual-localization_soft_guidance", config=vars(args))
+        accelerator.init_trackers("textual-localization_multi_hard_guidance", config=vars(args))
 
     # If passed along, set the training seed now.
     if args.seed is not None:
@@ -710,9 +761,12 @@ def main(args):
             {
                 "instance_prompt": args.instance_prompt,
                 "class_prompt_1": args.class_prompt_1,
+                "class_prompt_2": args.class_prompt_2,
                 "instance_data_dir": args.instance_data_dir,
                 "heatmap_dir_1":args.heatmap_dir_1,
+                "heatmap_dir_2":args.heatmap_dir_2,
                 "class_data_dir_1": args.class_data_dir_1,
+                "class_data_dir_2": args.class_data_dir_2,
             }
         ]
     else:
@@ -927,7 +981,6 @@ def main(args):
     train_v = args.train_v
     train_q = args.train_q
     train_out = args.train_out
-    #train_q_out = False if args.freeze_model == "crossattn_kv" else True   # the parameter args.freeze_model is not used in the code
     custom_diffusion_attn_procs = {}
 
     controller = AttentionStore(LOW_RESOURCE=False)
@@ -952,10 +1005,6 @@ def main(args):
             weights["to_k_custom_diffusion.weight"] = st[layer_name + ".to_k.weight"]
         if train_v:
             weights["to_v_custom_diffusion.weight"] = st[layer_name + ".to_v.weight"]
-        # weights = {
-        #     "to_k_custom_diffusion.weight": st[layer_name + ".to_k.weight"],
-        #     "to_v_custom_diffusion.weight": st[layer_name + ".to_v.weight"],
-        # }
         if train_q:
             weights["to_q_custom_diffusion.weight"] = st[layer_name + ".to_q.weight"]
         if train_out:
@@ -990,8 +1039,6 @@ def main(args):
 
     accelerator.register_for_checkpointing(custom_diffusion_layers)
 
-    # controller.num_att_layers = num_attention_layers
-    # print('controller_num_attention_layers:', num_attention_layers)
 
     #############################################################################
     #register CustomModelLoader as model saving hook
@@ -1160,7 +1207,8 @@ def main(args):
                 attention_maps_1 = batch["attention_maps_1"].to(dtype=weight_dtype)
                 attention_maps_1 = (attention_maps_1 - torch.min(attention_maps_1)) / (torch.max(attention_maps_1) - torch.min(attention_maps_1))
 
-                zero_area = (attention_maps_1 == 0).squeeze(1) # a tensor of boolean values with the elememt being True if the corresponding element in attention_maps_1 is 0
+                attention_maps_2 = batch["attention_maps_2"].to(dtype=weight_dtype)
+                attention_maps_2 = (attention_maps_2 - torch.min(attention_maps_2)) / (torch.max(attention_maps_2) - torch.min(attention_maps_2))
                 
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
@@ -1192,12 +1240,13 @@ def main(args):
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
                 if args.with_prior_preservation:
-                    # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                    model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
-                    target, target_prior = torch.chunk(target, 2, dim=0)
-                    mask = torch.chunk(batch["mask"], 2, dim=0)[0]
+
+                    # We have two class images, so chunk the output into 1/3 and 2/3
+                    model_pred_denoise, model_pred_prior = model_pred[:bsz // 3, :, :, :], model_pred[bsz // 3:, :, :, :]
+                    target_denoise, target_prior = target[:bsz // 3, :, :, :], target[bsz // 3:, :, :, :]
+                    mask = batch["mask"][:bsz // 3, :, :, :]
                     # Compute instance loss
-                    loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+                    loss = F.mse_loss(model_pred_denoise.float(), target_denoise.float(), reduction="none")
                     loss = ((loss * mask).sum([1, 2, 3]) / mask.sum([1, 2, 3])).mean()
 
                     # Compute prior loss
@@ -1210,14 +1259,14 @@ def main(args):
                     loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
                     loss = ((loss * mask).sum([1, 2, 3]) / mask.sum([1, 2, 3])).mean()
 
-
-
                 # add attention loss to loss
                 cross_attention_maps_1 = []
+                cross_attention_maps_2 = []
                 cross_attention_maps_res_1 = []
+                cross_attention_maps_res_2 = []
                 if args.with_prior_preservation:
                     prompts = batch["input_ids"]# it should be the batch of text prompts, but here we use batch["input_ids"] since the function only calculate the length of the batch
-                    for i in range(bsz // 2): # 2 batches, 1 is the instance images, 1 are the prior images
+                    for i in range(bsz // 3): # 3 batches, 1 is the instance images, 2 are the prior images
                         for res in res_list:
                             cross_attention_map = aggregate_current_attention(prompts=prompts,
                                                                             attention_store=controller, 
@@ -1226,27 +1275,31 @@ def main(args):
                                                                             is_cross=True,
                                                                             select=i)
                             num_tokens = batch["input_ids"][i].shape[0]#include the <sot> and <eot> tokens
-                            image_1 = cross_attention_map[:, :, 4]#counting from 0, the position of <new1> token locates at 4
+                            #cross attention image corresponding to the specific token
+                            image_1 = cross_attention_map[:, :, 4]#counting from 0, the position of <new1> token locates at 4, should be adjusted according to the text prompt
                             image_1 = torch.nn.functional.interpolate(image_1.unsqueeze(0).unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
                             image_1 = (image_1 - torch.min(image_1)) / (torch.max(image_1) - torch.min(image_1))
                             cross_attention_maps_res_1.append(image_1)
 
+                            image_2 = cross_attention_map[:, :, 8]#counting from 0, the position of <new2> token locates at 8, should be adjusted according to the text prompt
+                            image_2 = torch.nn.functional.interpolate(image_2.unsqueeze(0).unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
+                            image_2 = (image_2 - torch.min(image_2)) / (torch.max(image_2) - torch.min(image_2))
+                            cross_attention_maps_res_2.append(image_2)
 
                         cross_attention_maps_1.append(torch.stack(cross_attention_maps_res_1).mean(dim=0))
+                        cross_attention_maps_2.append(torch.stack(cross_attention_maps_res_2).mean(dim=0))
                         cross_attention_maps_res_1 = []
-
+                        cross_attention_maps_res_2 = []
 
                     cross_attention_maps_1 = torch.stack(cross_attention_maps_1).to("cuda")
-                    attention_loss_1 = torch.nn.MSELoss(reduction='none')(cross_attention_maps_1, attention_maps_1.squeeze(1))
-                    attention_loss_1 = attention_loss_1 * zero_area
-                    attention_loss_1 = torch.mean(attention_loss_1)
-
-                    
-                    attention_loss = attention_loss_1
-
+                    cross_attention_maps_2 = torch.stack(cross_attention_maps_2).to("cuda")
+                    attention_loss_1 = torch.nn.functional.mse_loss(cross_attention_maps_1, attention_maps_1.squeeze(1), reduction="mean")
+                    attention_loss_2 = torch.nn.functional.mse_loss(cross_attention_maps_2, attention_maps_2.squeeze(1), reduction="mean")
+                
+                    attention_loss = (attention_loss_1 + attention_loss_2) / 2.0
 
                 else:
-                    prompts = batch["input_ids"]
+                    prompts = batch["input_ids"]# it should be the batch oftext prompts, but here we use batch["input_ids"] since the function only calculate the length of the batch
                     for i in range(bsz): # 1 batch
                         for res in res_list:
                             cross_attention_map = aggregate_current_attention(prompts=prompts, #get the averaged cross attention map from different layers (in same size) of the ith text in batch
@@ -1257,25 +1310,36 @@ def main(args):
                                                                             select=i)
 
                             num_tokens = batch["input_ids"][i].shape[0]#include the <sot> and <eot> tokens
-                            image_1 = cross_attention_map[:, :, 4]#counting from 0, the position of <new1> token locates at 4
+                            #cross attention image corresponding to the specific token
+                            image_1 = cross_attention_map[:, :, 4]#counting from 0, the position of <new1> token locates at 4, should be adjusted according to the text prompt
                             image_1 = torch.nn.functional.interpolate(image_1.unsqueeze(0).unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
                             image_1 = (image_1 - torch.min(image_1)) / (torch.max(image_1) - torch.min(image_1))
                             cross_attention_maps_res_1.append(image_1) #averaged cross attention map of size <res> x <res>
 
+                            image_2 = cross_attention_map[:, :, 8]#counting from 0, the position of <new2> token locates at 8, should be adjusted according to the text prompt
+                            image_2 = torch.nn.functional.interpolate(image_2.unsqueeze(0).unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
+                            image_2 = (image_2 - torch.min(image_2)) / (torch.max(image_2) - torch.min(image_2))
+                            cross_attention_maps_res_2.append(image_2)
 
                         cross_attention_maps_1.append(torch.stack(cross_attention_maps_res_1).mean(dim=0))
+                        cross_attention_maps_2.append(torch.stack(cross_attention_maps_res_2).mean(dim=0))
                         cross_attention_maps_res_1 = []
+                        cross_attention_maps_res_2 = []
 
 
                     cross_attention_maps_1 = torch.stack(cross_attention_maps_1).to("cuda")
+                    cross_attention_maps_2 = torch.stack(cross_attention_maps_2).to("cuda")
+
 
                     attention_loss_1 = torch.nn.functional.mse_loss(cross_attention_maps_1, attention_maps_1.squeeze(1), reduction="mean")
-                    attention_loss = attention_loss_1
+                    attention_loss_2 = torch.nn.functional.mse_loss(cross_attention_maps_2, attention_maps_2.squeeze(1), reduction="mean")
+                    attention_loss = (attention_loss_1 + attention_loss_2) / 2.0
 
                 if global_step % 100 == 0:
                     show_attention_map_during_training(cross_attention_map = cross_attention_maps_1, obj=1)
+                    show_attention_map_during_training(cross_attention_map = cross_attention_maps_2, obj=2)
                     show_attention_map_during_training(cross_attention_map = attention_maps_1.squeeze(1), obj="ground_truth")#cross_attention_map = cross_attention_maps_2, obj=2
-
+                    show_attention_map_during_training(cross_attention_map = attention_maps_2.squeeze(1), obj="ground_truth_2")
 
                 wandb.log({"denoise_loss": loss})
                 if args.with_prior_preservation:
@@ -1325,7 +1389,6 @@ def main(args):
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
-
 
                 if global_step > 49 and global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
